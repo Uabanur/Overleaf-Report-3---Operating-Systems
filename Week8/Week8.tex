@@ -1,0 +1,55 @@
+\section{Week 8 - Synchronization}
+
+%\begin{itemize}
+    %\item Explain what mutual exclusion means.
+    %\item How can semaphores be used to achieve mutual exclusion?
+    %\item How can mutexes be used?
+    %\item How can monitors be used?
+    
+    %In the example kernel and when running in kernel mode, interrupts are disabled. This makes it very easy to implement atomic actions.
+    
+    %\item How would you implement atomic actions if interrupts were enabled?
+    %\item How would you implement atomic actions if you have multiple processors?
+%\end{itemize}
+
+\textbf{Mutual Exclusion}
+
+When multiple actions access the same resources, and race conditions may occur, mutual exclusion is important to make sure, that the resources are handled properly. These kind of actions (or set of actions), are known as critical sections for the actor, which in our case could be an executing thread accessing a shared variable. If multiple actors have critical sections all needing to be mutually excluded, this is known as a critical region; a set of critical sections. 
+
+Mutual exclusion, as implied in the text above, is the act of excluding all but a single member. Once the first has entered, any other member must wait for the first to finish before proceeding. This translates to our operating system by, at most letting a single thread be in a critical region at any time. In practice, several critical regions may exist, all protecting different shared resources, but for each critical region, mutual exclusion should be maintained to ensure the intended outcome. 
+
+\textbf{Semaphores}
+
+Semaphores are a great tool for restricting access and maintaining order. Semaphores work as a resource where the users never see what value the semaphore contains directly, only the consequences thereof. A semaphore is created with an initial value determined by the user. From here on, the user has two possible operations to perform on the semaphore; semaphore-down (\texttt{P}) or semaphore-up (\texttt{V}). These operations lower and raise the internal value some special amount respectively, with the amount depending on the implementation and use of the semaphore. A special thing about semaphores is, that the internal value is not allowed to be negative, meaning if a user tries to lower the value past zero, he will be denied. This is exactly the property which is harnessed for mutual exclusion, together with the fact that the two semaphore operations are themselves executed atomically (no interleavings with other operations). 
+
+When a critical section is entered, a semaphore-down operation is performed. If the thread is not denied, the section is entered. When exiting the critical section, the semaphore-up operation is performed. That way other threads will be denied as long as the first thread is in the critical section, assuming that the semaphore was created with an internal value of 1, and the amount the internal value is incremented/decremented is by 1. 
+
+Since semaphores may have any non-negative value in it's lifetime, it can be used for many other management implementations, such as a state where $n$ threads are allowed to be in at the same time, since the initial value of the semaphore determines how many semaphore-down operations are accepted before a semaphore-up operation is needed. 
+
+\textbf{Mutexes}
+
+The concept of mutexes is much like that of semaphores, if we only look at how semaphores are used for mutual exclusion. The mutex can be in one of two states; \textit{locked} and \textit{unlocked}. The operations on a mutex are called \textit{mutex\_lock} and \textit{mutex\_unlock}, and the effect of the operations are as the names imply. When a thread enters a critical section, they call \textit{mutex\_lock}. If the thread is denied it is blocked until the mutex is unlocked. Once the thread has entered the critical section and done the deed, \textit{mutex\_unlock} is called to free the mutex for other threads.
+
+\textbf{Monitors}
+
+The key concept of atomic actions are very important when dealing with shared resources. Semaphores and mutexes are good at handling this, but a more centralized strategy is to collect all access to the shared resources in one unit and make sure, that all procedures in that unit is handled as a critical region. This unit/object is called a monitor. 
+
+Since the monitor has mutual exclusion, any thread trying to use the monitor while another thread is using it, is suspended until the monitor is free. This way the procedures inside the monitor does not suffer from race conditions. Monitors use constructs such as condition variables or condition queues to store the threads for synchronization, e.g. when trying to insert information into a buffer which is full. The condition variables have the the operations \textit{wait} and \textit{signal} which either stores or frees a thread in the respective variable. When a \textit{wait} operation is called, a suspended thread waiting to enter the monitor is granted access. 
+
+When a thread calls the \textit{signal} operation two things may occur depending on the implementation of the monitor. Either the calling thread continues in the monitor, or the signalled thread continues in the monitor. Since a monitor is dependent on mutual exclusion, both threads are not allowed to both proceed in the monitor. Both solutions are possible, but according to the book Modern Operating Systems \cite{tanembaum} section 2.3.7, Brinch Hansen found that the prior solution was desired as long as the signal came as the last statement in the monitor, merging the signal and exiting the monitor.
+
+\textbf{Atomic actions with interrupts enabled}
+
+The operating systems implemented in the labs so far is a non-preemptive system with interrupts disabled. This means that all implementation of the kernel is handled as atomic actions, as the control flow will only change if explicitly told so. With interrupts enabled, we need to implement mutual exclusion in order to ensure that the actions are not interrupted. This could be done by implementing the specific actions as procedures in a monitor if possible, but since C does not support monitors, mutexes could be used instead. The action would be handled as a critical section and surrounded with the \textit{mutex\_lock} and \textit{mutex\_unlock} operations.
+
+\textbf{Atomic actions with multiple processors}
+
+Defining critical regions across multiple processors, means that there must some sort of communication between the processors. Either a specific memory location is specified for a lock in memory (if the processors have access to the same memory) or directly on disk. Since this lock presumable will be used often, disk would not be recommended as it would be highly inefficient. Hardware support, in the form of dedicated cache memory shared between the processors for the lock, would be a good way to solve the problem. For atomic lock operations, \texttt{TSL} (Test-and-Set-Lock) operations is often the preferred choice. This also needs hardware support to make the \texttt{TSL} operations atomic. \texttt{TSL} works by settings the value of the lock to \textit{locked} and returning the initial value of the lock. When the critical region is exited, the lock is set to \textit{unlocked}, much like the previous discussed cases.
+
+\textbf{Lab implementation of semaphores}
+
+Semaphores are implemented with a data structure much like the processes and threads. A global array of structs is initialized with 256 elements, using the macro \texttt{MAX\_SEMAPHORES} in the file \texttt{kernel\_customization.h}. A semaphore is defined by its internal value operated on by the semaphore-up and semaphore-down operations. The semaphore also has a flag stating if it is currently in use (called \texttt{used}) and a pointer to the owning process. The \texttt{used} flag is used when creating semaphores, distinguishing between free and occupied semaphores. Since semaphores should only be accessible from inside the owning process, the process pointer is checked when ever a semaphore is referenced, together with the \texttt{used} flag. When a semaphore-down operation is called on a semaphore with an internal value of zero, the system call could either block the thread or return an error. Returning an error means that a thread trying to gain access to a critical region would need to perform a busy wait, which is unwanted. 
+
+When a semaphore is created, calling the \texttt{createsemaphore} system call a semaphore not in use is found and initialized; setting the internal value to the specified parameter given on the \texttt{edi} register, marking it as used and setting the process pointer to the current threads process' address. For the semaphore-up and down operation, if the semaphore's process pointer and \texttt{used} flag is not as expected, \texttt{ERROR} is returned. For the semaphore-up operation the internal value is then incremented followed by a search through the threads. If a thread is found, who's process is the semaphores process and is waiting for that exact semaphore, the thread is unblocked. For the semaphore-down operation, the internal value is checked for zero. If it is zero, the thread is blocked and the thread is set to yield, allowing other threads to leave the respective critical region. If the value is non-zero, it must be positive, and the internal value is decremented and the thread may proceed.
+
+This implementation utilizes that interrupts are disabled during system call executions in the kernel, and therefore mutually excluded. 
